@@ -266,11 +266,11 @@ func renderSingleApp(model *app) ([]styledLine, layoutMetrics) {
 	} else if model.loading {
 		loadingText := "正在预取后续动态"
 		if model.refreshing {
-			loadingText = "正在刷新关注流"
+			loadingText = "正在刷新" + model.mode.label()
 		}
 		statusParts = append(statusParts, spinnerFrames[model.spinner%len(spinnerFrames)]+" "+loadingText)
 	} else if model.end {
-		statusParts = append(statusParts, "已到当前关注流末尾")
+		statusParts = append(statusParts, "已到当前"+model.mode.label()+"末尾")
 	}
 	if model.message != "" && !model.voting {
 		statusParts = append(statusParts, model.message)
@@ -1039,7 +1039,7 @@ func renderWideApp(model *app) ([]styledLine, layoutMetrics) {
 
 func renderSidebar(model *app, width int) []styledLine {
 	lines := make([]styledLine, model.height)
-	lines[0] = styledLine{text: " 关注动态", style: ansiBold + ansiCyan}
+	lines[0] = styledLine{text: " " + model.mode.label() + "动态", style: ansiBold + ansiCyan}
 	status := fmt.Sprintf(" 已加载 %d 条 · 当前第 %d 条", len(model.items), model.index+1)
 	lines[1] = styledLine{text: truncateCells(status, width-1), style: ansiDim}
 
@@ -1154,7 +1154,7 @@ func mergeColumns(left styledLine, leftWidth int, right styledLine, rightWidth i
 
 func renderTooSmall(width, height int) []styledLine {
 	return []styledLine{
-		{text: "知乎关注", style: ansiBold + ansiCyan},
+		{text: "知乎 TUI", style: ansiBold + ansiCyan},
 		{},
 		{text: fmt.Sprintf("终端当前为 %d×%d，至少需要 42×14。", width, height), style: ansiRed},
 		{text: "请放大终端窗口，或按 q 退出。", style: ansiDim},
@@ -1165,20 +1165,20 @@ func renderEmpty(model *app) []styledLine {
 	lines := []styledLine{{text: headerText(model), style: ansiBold + ansiCyan}, {}, {}}
 	if model.err != nil {
 		lines = append(lines,
-			styledLine{text: "关注流加载失败", style: ansiBold + ansiRed},
+			styledLine{text: model.mode.label() + "加载失败", style: ansiBold + ansiRed},
 			styledLine{text: truncateCells(model.err.Error(), maxInt(20, model.width-4))},
 			styledLine{},
 			styledLine{text: "按 r 重试，按 q 退出。", style: ansiCyan},
 		)
 	} else if model.loading {
 		lines = append(lines,
-			styledLine{text: spinnerFrames[model.spinner%len(spinnerFrames)] + " 正在加载你的知乎关注流…", style: ansiBlue},
+			styledLine{text: spinnerFrames[model.spinner%len(spinnerFrames)] + " 正在加载知乎" + model.mode.label() + "…", style: ansiBlue},
 			styledLine{},
-			styledLine{text: "首次加载完成后会自动预取，之后切换无需等待。", style: ansiDim},
+			styledLine{text: "按 n / p 切换条目，按 r 刷新。", style: ansiDim},
 		)
 	} else {
 		lines = append(lines,
-			styledLine{text: "关注流里暂时没有可显示的动态。", style: ansiDim},
+			styledLine{text: model.mode.label() + "里暂时没有可显示的动态。", style: ansiDim},
 			styledLine{text: "按 r 刷新，按 q 退出。", style: ansiCyan},
 		)
 	}
@@ -1225,7 +1225,7 @@ func renderHelp(width, height int) []styledLine {
 }
 
 func headerText(model *app) string {
-	text := " 知乎关注 "
+	text := " 知乎" + model.mode.label() + " "
 	if len(model.items) > 0 {
 		text += fmt.Sprintf("· %s · 已加载 %d 条", typeLabel(model.items[model.index].kind), len(model.items))
 	}

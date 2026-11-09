@@ -101,6 +101,12 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		err = runAnswers(ctx, rest, stdout)
 	case "answer":
 		err = runAnswer(ctx, rest, stdout)
+	case "recommend":
+		if len(rest) > 0 && rest[0] == "--tui" {
+			err = runTUI(ctx, rest[1:], stdout, feedtui.Recommended, "recommend")
+		} else {
+			err = runFeed(ctx, rest, stdout)
+		}
 	case "feed":
 		err = runFeed(ctx, rest, stdout)
 	case "feeds":
@@ -165,13 +171,15 @@ Usage:
 
 Commands:
   login, logout, status, whoami
-  search, hot, answers, answer, feed, feeds
+  search, hot, answers, answer, feed, feeds, recommend
   user, user-answers, user-articles, followers, following
   vote, follow-question, collections, notifications
   reply-comment
   ask, pin, article, delete-question, delete-pin, delete-article, delete-comment
 
 Interactive:
+  zhihu recommend --tui             Browse recommendations in a full-screen terminal UI
+  zhihu hot --tui                   Browse the hot list in a full-screen terminal UI
   %-32s %s
   %-32s %s
 `, "zhihu feed --tui", "Browse your following feed in a full-screen terminal UI",
@@ -189,11 +197,13 @@ func printCommandHelp(w io.Writer, cmd string) error {
 	case "search":
 		usage = "Usage: zhihu search QUERY [-t TYPE] [-l LIMIT] [-a ANSWERS] [--json]"
 	case "hot":
-		usage = "Usage: zhihu hot [-l LIMIT] [--json]"
+		usage = "Usage: zhihu hot [-l LIMIT] [--json]\n  zhihu hot --tui"
 	case "answers":
 		usage = "Usage: zhihu answers QUESTION_ID [-l LIMIT] [--sort default|created] [--json]"
 	case "answer":
 		usage = "Usage: zhihu answer ANSWER_ID [-c] [-l LIMIT] [--json]"
+	case "recommend":
+		usage = "Usage: zhihu recommend [-l LIMIT] [--json]\n  zhihu recommend --tui"
 	case "feed":
 		usage = "Usage:\n  zhihu feed [-l LIMIT] [--json]\n  zhihu feed --tui"
 	case "feeds":
@@ -228,19 +238,23 @@ func printCommandHelp(w io.Writer, cmd string) error {
 }
 
 func runFeedTUI(ctx context.Context, args []string, out io.Writer) error {
+	return runTUI(ctx, args, out, feedtui.Following, "feed")
+}
+
+func runTUI(ctx context.Context, args []string, out io.Writer, mode feedtui.Mode, command string) error {
 	if len(args) != 0 {
-		return fmt.Errorf("usage: zhihu feed --tui")
+		return fmt.Errorf("usage: zhihu %s --tui", command)
 	}
 	terminal, ok := out.(*os.File)
 	if !ok {
-		return fmt.Errorf("zhihu feed --tui requires an interactive terminal")
+		return fmt.Errorf("zhihu %s --tui requires an interactive terminal", command)
 	}
 	c, err := authenticatedClient()
 	if err != nil {
 		return err
 	}
 	defer c.Close()
-	return feedtui.Run(ctx, c, os.Stdin, terminal)
+	return feedtui.Run(ctx, c, os.Stdin, terminal, mode)
 }
 
 func runLogin(ctx context.Context, args []string, out io.Writer) error {
@@ -423,6 +437,9 @@ func runSearch(ctx context.Context, args []string, out io.Writer) error {
 }
 
 func runHot(ctx context.Context, args []string, out io.Writer) error {
+	if len(args) > 0 && args[0] == "--tui" {
+		return runTUI(ctx, args[1:], out, feedtui.Hot, "hot")
+	}
 	opts, err := parseOptions(args, specs(opt("-l", "limit", true), opt("--limit", "limit", true), opt("--json", "json", false)))
 	if err != nil {
 		return err

@@ -16,6 +16,27 @@ import (
 
 const feedPageSize = 10
 
+type Mode uint8
+
+const (
+	Following Mode = iota
+	Recommended
+	Hot
+)
+
+func (mode Mode) label() string {
+	switch mode {
+	case Following:
+		return "关注"
+	case Recommended:
+		return "推荐"
+	case Hot:
+		return "热榜"
+	default:
+		panic("invalid TUI mode")
+	}
+}
+
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 var foldedGroupCountPattern = regexp.MustCompile(`^(还有\s*)\d+`)
 
@@ -31,6 +52,8 @@ type feedSource interface {
 	linkCardSource
 	GetSelfInfo(context.Context) (map[string]any, error)
 	GetFollowingFeed(context.Context, string, int) (map[string]any, error)
+	GetRecommendedFeed(context.Context, string, int) (map[string]any, error)
+	GetHotList(context.Context, int) (map[string]any, error)
 	GetCommentsPage(context.Context, string, string, string, int, string) (map[string]any, error)
 	GetChildCommentsPage(context.Context, string, string, int) (map[string]any, error)
 	GetUserProfile(context.Context, string) (map[string]any, error)
@@ -52,6 +75,7 @@ type linkCardSource interface {
 
 type app struct {
 	source                 feedSource
+	mode                   Mode
 	currentUserID          string
 	items                  []feedItem
 	index                  int
@@ -151,10 +175,10 @@ type linkCardRetryResult struct {
 	generation int
 }
 
-// following feed and restores the terminal before returning.
-func Run(ctx context.Context, source feedSource, in, out *os.File) (runErr error) {
+// Run displays the selected feed and restores the terminal before returning.
+func Run(ctx context.Context, source feedSource, in, out *os.File, mode Mode) (runErr error) {
 	if !isTerminal(in) || !isTerminal(out) {
-		return fmt.Errorf("zhihu feed --tui requires an interactive terminal")
+		return fmt.Errorf("TUI requires an interactive terminal")
 	}
 	self, err := source.GetSelfInfo(ctx)
 	if err != nil {
@@ -185,6 +209,7 @@ func Run(ctx context.Context, source feedSource, in, out *os.File) (runErr error
 	}
 	model := &app{
 		source:                 source,
+		mode:                   mode,
 		currentUserID:          currentUserID,
 		width:                  width,
 		height:                 height,
@@ -332,7 +357,21 @@ func (model *app) startFetch(ctx context.Context, reset bool) {
 		nextURL = ""
 	}
 	go func() {
-		response, err := model.source.GetFollowingFeed(ctx, nextURL, feedPageSize)
+		var response map[string]any
+		var err error
+		switch model.mode {
+		case Following:
+			response, err = model.source.GetFollowingFeed(ctx, nextURL, feedPageSize)
+		case Recommended:
+			response, err = model.source.GetRecommendedFeed(ctx, nextURL, feedPageSize)
+		case Hot:
+			response, err = model.source.GetHotList(ctx, 50)
+			if err == nil {
+				response, err = normalizeHotList(response)
+			}
+		default:
+			panic("invalid TUI mode")
+		}
 		if err == nil {
 			hydrateFeedLinkCards(ctx, model.source, response)
 		}
@@ -478,7 +517,11 @@ func (model *app) handleKey(ctx context.Context, key keyEvent) bool {
 		model.showHelp = true
 	case "r":
 		model.clearPageAnchor()
-		model.captureRefreshBoundary()
+		if model.mode == Following {
+			model.captureRefreshBoundary()
+		} else {
+			model.firstViewedKey, model.furthestViewedKey = "", ""
+		}
 		model.commentMode = false
 		model.bodyScroll = 0
 		model.scroll = 0

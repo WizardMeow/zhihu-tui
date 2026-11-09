@@ -752,3 +752,28 @@ func TestGetCollectionsRequiresURLToken(t *testing.T) {
 		t.Fatalf("err=%T, want LoginError", err)
 	}
 }
+
+func TestGetRecommendedFeedUsesPagingURL(t *testing.T) {
+	requests := 0
+	c, server := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.URL.Path != "/api/v3/feed/topstory/recommend" {
+			t.Fatalf("path=%s", r.URL.Path)
+		}
+		if requests == 1 {
+			if r.URL.Query().Get("page_number") != "1" || r.URL.Query().Get("limit") != "10" || r.URL.Query().Get("action") != "down" {
+				t.Fatalf("initial query=%s", r.URL.RawQuery)
+			}
+		} else if r.URL.RawQuery != "page_number=2&after_id=cursor" {
+			t.Fatalf("paging query=%s", r.URL.RawQuery)
+		}
+		writeJSON(t, w, http.StatusOK, map[string]any{"data": []any{}})
+	})
+	defer server.Close()
+	if _, err := c.GetRecommendedFeed(context.Background(), "", 10); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.GetRecommendedFeed(context.Background(), server.URL+"/api/v3/feed/topstory/recommend?page_number=2&after_id=cursor", 10); err != nil {
+		t.Fatal(err)
+	}
+}

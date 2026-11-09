@@ -57,3 +57,19 @@ func TestFeedTUIDispatchesBeforeRegularFeedOptions(t *testing.T) {
 		t.Fatalf("feed --tui was not dispatched to the TUI: %q", stderr.String())
 	}
 }
+
+func TestRecommendedAndHotTUIDispatch(t *testing.T) {
+	for _, command := range []string{"recommend", "hot"} {
+		t.Run(command, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if code := Run([]string{command, "--tui"}, &stdout, &stderr); code != 1 || !strings.Contains(stderr.String(), "requires an interactive terminal") {
+				t.Fatalf("code=%d stderr=%q", code, stderr.String())
+			}
+			stdout.Reset()
+			stderr.Reset()
+			if code := Run([]string{command, "--help"}, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), command+" --tui") {
+				t.Fatalf("help code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+			}
+		})
+	}
+}

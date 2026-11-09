@@ -258,8 +258,17 @@ func (c *Client) GetFollowing(ctx context.Context, urlToken string, offset, limi
 }
 
 func (c *Client) GetFeed(ctx context.Context, limit int) (map[string]any, error) {
-	params := url.Values{"page_number": {"1"}, "limit": {strconv.Itoa(limit)}, "action": {"down"}}
-	result, err := c.getJSON(ctx, c.endpoints.APIV3+"/feed/topstory/recommend", params)
+	return c.GetRecommendedFeed(ctx, "", limit)
+}
+
+func (c *Client) GetRecommendedFeed(ctx context.Context, nextURL string, limit int) (map[string]any, error) {
+	target := nextURL
+	var params url.Values
+	if target == "" {
+		target = c.endpoints.APIV3 + "/feed/topstory/recommend"
+		params = url.Values{"page_number": {"1"}, "limit": {strconv.Itoa(limit)}, "action": {"down"}}
+	}
+	result, err := c.getJSON(ctx, target, params)
 	if err != nil {
 		return nil, err
 	}

@@ -1059,3 +1059,11 @@ func waitForCommentFetch(t *testing.T, fetches <-chan commentFetchResult) commen
 		return commentFetchResult{}
 	}
 }
+
+func (source *commentTestSource) GetRecommendedFeed(context.Context, string, int) (map[string]any, error) {
+	return nil, nil
+}
+
+func (source *commentTestSource) GetHotList(context.Context, int) (map[string]any, error) {
+	return nil, nil
+}
