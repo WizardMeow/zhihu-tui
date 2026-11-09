@@ -777,3 +777,29 @@ func TestGetRecommendedFeedUsesPagingURL(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestGetQuestionAnswersPageFollowsPagingURL(t *testing.T) {
+	requests := 0
+	c, server := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.URL.Path != "/api/v4/questions/7/answers" {
+			t.Fatalf("path=%s", r.URL.Path)
+		}
+		if requests == 1 {
+			query := r.URL.Query()
+			if query.Get("offset") != "0" || query.Get("limit") != "10" || query.Get("sort_by") != "default" || !strings.Contains(query.Get("include"), "content") {
+				t.Fatalf("initial query=%s", r.URL.RawQuery)
+			}
+		} else if r.URL.RawQuery != "offset=10&cursor=next" {
+			t.Fatalf("paging query=%s", r.URL.RawQuery)
+		}
+		writeJSON(t, w, http.StatusOK, map[string]any{"data": []any{}})
+	})
+	defer server.Close()
+	if _, err := c.GetQuestionAnswersPage(context.Background(), "7", "", 10); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.GetQuestionAnswersPage(context.Background(), "7", server.URL+"/api/v4/questions/7/answers?offset=10&cursor=next", 10); err != nil {
+		t.Fatal(err)
+	}
+}

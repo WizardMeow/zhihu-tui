@@ -257,6 +257,14 @@ func (c *Client) GetFollowing(ctx context.Context, urlToken string, offset, limi
 	return c.getMap(ctx, c.endpoints.APIV4+"/members/"+url.PathEscape(urlToken)+"/followees", params)
 }
 
+// GetQuestionAnswersPage follows the answer endpoint's paging.next URL.
+func (c *Client) GetQuestionAnswersPage(ctx context.Context, questionID, nextURL string, limit int) (map[string]any, error) {
+	if nextURL == "" {
+		return c.GetQuestionAnswers(ctx, questionID, 0, limit, "default")
+	}
+	return c.getMap(ctx, nextURL, nil)
+}
+
 func (c *Client) GetFeed(ctx context.Context, limit int) (map[string]any, error) {
 	return c.GetRecommendedFeed(ctx, "", limit)
 }

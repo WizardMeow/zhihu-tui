@@ -54,6 +54,7 @@ type feedSource interface {
 	GetFollowingFeed(context.Context, string, int) (map[string]any, error)
 	GetRecommendedFeed(context.Context, string, int) (map[string]any, error)
 	GetHotList(context.Context, int) (map[string]any, error)
+	GetQuestionAnswersPage(context.Context, string, string, int) (map[string]any, error)
 	GetCommentsPage(context.Context, string, string, string, int, string) (map[string]any, error)
 	GetChildCommentsPage(context.Context, string, string, int) (map[string]any, error)
 	GetUserProfile(context.Context, string) (map[string]any, error)
@@ -76,6 +77,9 @@ type linkCardSource interface {
 type app struct {
 	source                 feedSource
 	mode                   Mode
+	question               *feedItem
+	parent                 *app
+	nextView               *app
 	currentUserID          string
 	items                  []feedItem
 	index                  int
@@ -207,26 +211,7 @@ func Run(ctx context.Context, source feedSource, in, out *os.File, mode Mode) (r
 	if err != nil {
 		return fmt.Errorf("read terminal size: %w", err)
 	}
-	model := &app{
-		source:                 source,
-		mode:                   mode,
-		currentUserID:          currentUserID,
-		width:                  width,
-		height:                 height,
-		fetches:                make(chan fetchResult, 1),
-		comments:               map[string]*commentState{},
-		commentFetches:         make(chan commentFetchResult, 2),
-		commentRelations:       map[string]commentRelation{},
-		commentRelationPending: map[string]struct{}{},
-		commentRelationFetches: make(chan commentRelationFetchResult, 4),
-		commentChildComplete:   map[string]struct{}{},
-		commentChildPending:    map[string]struct{}{},
-		commentChildFetches:    make(chan commentChildFetchResult, 4),
-		commentPosts:           make(chan commentPostResult, 1),
-		voteResults:            make(chan voteResult, 1),
-		linkCardRetries:        map[string]int{},
-		linkCardFetches:        make(chan linkCardRetryResult, 2),
-	}
+	model := newApp(source, currentUserID, width, height, mode)
 	keys := make(chan keyEvent)
 	readErrors := make(chan error, 1)
 	go readKeys(in, keys, readErrors)
@@ -268,6 +253,11 @@ func Run(ctx context.Context, source feedSource, in, out *os.File, mode Mode) (r
 		case key := <-keys:
 			if model.handleKey(ctx, key) {
 				return nil
+			}
+			if model.nextView != nil {
+				next := model.nextView
+				model.nextView = nil
+				model = next
 			}
 			model.maybePrefetch(ctx)
 			if err := model.render(out); err != nil {
@@ -339,6 +329,29 @@ func Run(ctx context.Context, source feedSource, in, out *os.File, mode Mode) (r
 	}
 }
 
+func newApp(source feedSource, currentUserID string, width, height int, mode Mode) *app {
+	return &app{
+		source:                 source,
+		mode:                   mode,
+		currentUserID:          currentUserID,
+		width:                  width,
+		height:                 height,
+		fetches:                make(chan fetchResult, 1),
+		comments:               map[string]*commentState{},
+		commentFetches:         make(chan commentFetchResult, 2),
+		commentRelations:       map[string]commentRelation{},
+		commentRelationPending: map[string]struct{}{},
+		commentRelationFetches: make(chan commentRelationFetchResult, 4),
+		commentChildComplete:   map[string]struct{}{},
+		commentChildPending:    map[string]struct{}{},
+		commentChildFetches:    make(chan commentChildFetchResult, 4),
+		commentPosts:           make(chan commentPostResult, 1),
+		voteResults:            make(chan voteResult, 1),
+		linkCardRetries:        map[string]int{},
+		linkCardFetches:        make(chan linkCardRetryResult, 2),
+	}
+}
+
 func (model *app) startFetch(ctx context.Context, reset bool) {
 	if model.loading && !reset {
 		return
@@ -359,12 +372,17 @@ func (model *app) startFetch(ctx context.Context, reset bool) {
 	go func() {
 		var response map[string]any
 		var err error
-		switch model.mode {
-		case Following:
+		switch {
+		case model.question != nil:
+			response, err = model.source.GetQuestionAnswersPage(ctx, model.question.id, nextURL, feedPageSize)
+			if err == nil {
+				response, err = normalizeQuestionAnswers(response, *model.question)
+			}
+		case model.mode == Following:
 			response, err = model.source.GetFollowingFeed(ctx, nextURL, feedPageSize)
-		case Recommended:
+		case model.mode == Recommended:
 			response, err = model.source.GetRecommendedFeed(ctx, nextURL, feedPageSize)
-		case Hot:
+		case model.mode == Hot:
 			response, err = model.source.GetHotList(ctx, 50)
 			if err == nil {
 				response, err = normalizeHotList(response)
@@ -515,9 +533,19 @@ func (model *app) handleKey(ctx context.Context, key keyEvent) bool {
 	switch key {
 	case "?":
 		model.showHelp = true
+	case keyEscape:
+		if model.parent != nil {
+			model.parent.width, model.parent.height = model.width, model.height
+			model.parent.zenMode = model.zenMode
+			model.nextView = model.parent
+		}
+	case "a":
+		if !model.commentMode {
+			model.openQuestionAnswers(ctx)
+		}
 	case "r":
 		model.clearPageAnchor()
-		if model.mode == Following {
+		if model.mode == Following && model.question == nil {
 			model.captureRefreshBoundary()
 		} else {
 			model.firstViewedKey, model.furthestViewedKey = "", ""
@@ -584,6 +612,8 @@ func (model *app) handleKey(ctx context.Context, key keyEvent) bool {
 	case "\r":
 		if model.commentMode {
 			model.toggleFocusedCommentChildren(ctx)
+		} else if len(model.items) > 0 && model.items[model.index].kind == "question" {
+			model.openQuestionAnswers(ctx)
 		} else if !model.toggleFoldedGroup() {
 			model.scrollDown(maxInt(1, model.metrics.bodyHeight/2))
 		}

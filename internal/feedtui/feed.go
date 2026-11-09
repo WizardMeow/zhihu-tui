@@ -58,6 +58,7 @@ type feedItem struct {
 	key              string
 	id               string
 	kind             string
+	questionID       string
 	action           string
 	voteActors       []voteActor
 	voteAction       string
@@ -246,6 +247,7 @@ func parseFeedItem(raw map[string]any) (feedItem, bool) {
 		key:              key,
 		id:               id,
 		kind:             kind,
+		questionID:       strings.TrimSpace(toString(question["id"])),
 		action:           action,
 		voteActors:       voteActors,
 		voteAction:       voteAction,

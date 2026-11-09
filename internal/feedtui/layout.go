@@ -266,11 +266,11 @@ func renderSingleApp(model *app) ([]styledLine, layoutMetrics) {
 	} else if model.loading {
 		loadingText := "正在预取后续动态"
 		if model.refreshing {
-			loadingText = "正在刷新" + model.mode.label()
+			loadingText = "正在刷新" + model.listLabel()
 		}
 		statusParts = append(statusParts, spinnerFrames[model.spinner%len(spinnerFrames)]+" "+loadingText)
 	} else if model.end {
-		statusParts = append(statusParts, "已到当前"+model.mode.label()+"末尾")
+		statusParts = append(statusParts, "已到当前"+model.listLabel()+"末尾")
 	}
 	if model.message != "" && !model.voting {
 		statusParts = append(statusParts, model.message)
@@ -333,6 +333,21 @@ func footerHints(model *app, width int) string {
 	case model.zenMode:
 		full = fmt.Sprintf("j/k 滚动  f/b 翻页  d/u 半页  n/p 切换  v %s  w 评论  c 评论  z 双栏  o 打开  r 刷新  ? 帮助  q 退出", action)
 	}
+	navigation := ""
+	if !model.composing && !model.commentMode && len(model.items) > 0 {
+		switch model.items[model.index].kind {
+		case "question":
+			navigation = "Enter 回答列表  "
+		case "answer":
+			if model.question == nil {
+				navigation = "a 所属问题  "
+			}
+		}
+	}
+	if !model.composing && model.parent != nil {
+		navigation += "Esc 返回  "
+	}
+	full, compact, minimal = navigation+full, navigation+compact, navigation+minimal
 	if stringCellWidth(full) <= width {
 		return full
 	}
@@ -1039,7 +1054,11 @@ func renderWideApp(model *app) ([]styledLine, layoutMetrics) {
 
 func renderSidebar(model *app, width int) []styledLine {
 	lines := make([]styledLine, model.height)
-	lines[0] = styledLine{text: " " + model.mode.label() + "动态", style: ansiBold + ansiCyan}
+	title := model.listLabel() + "动态"
+	if model.question != nil {
+		title = "问题回答"
+	}
+	lines[0] = styledLine{text: " " + title, style: ansiBold + ansiCyan}
 	status := fmt.Sprintf(" 已加载 %d 条 · 当前第 %d 条", len(model.items), model.index+1)
 	lines[1] = styledLine{text: truncateCells(status, width-1), style: ansiDim}
 
@@ -1105,9 +1124,16 @@ func renderSidebar(model *app, width int) []styledLine {
 			titlePrefix = hierarchyIndent
 		}
 		titleWidth := maxInt(1, width-stringCellWidth(marker)-1)
-		title := truncateCells(titlePrefix+item.title, titleWidth)
+		itemTitle := item.title
+		if model.question != nil {
+			itemTitle = item.author + " 的回答"
+		}
+		title := truncateCells(titlePrefix+itemTitle, titleWidth)
 		lines[row] = styledLine{text: marker + title, style: style}
 		summary := firstNonEmpty(item.action, item.author, typeLabel(item.kind))
+		if model.question != nil {
+			summary = firstNonEmpty(item.stats, item.headline, "回答")
+		}
 		if len(item.foldedItems) > 0 {
 			if item.groupOpen {
 				summary = "e/Enter 收起"
@@ -1165,22 +1191,25 @@ func renderEmpty(model *app) []styledLine {
 	lines := []styledLine{{text: headerText(model), style: ansiBold + ansiCyan}, {}, {}}
 	if model.err != nil {
 		lines = append(lines,
-			styledLine{text: model.mode.label() + "加载失败", style: ansiBold + ansiRed},
+			styledLine{text: model.listLabel() + "加载失败", style: ansiBold + ansiRed},
 			styledLine{text: truncateCells(model.err.Error(), maxInt(20, model.width-4))},
 			styledLine{},
 			styledLine{text: "按 r 重试，按 q 退出。", style: ansiCyan},
 		)
 	} else if model.loading {
 		lines = append(lines,
-			styledLine{text: spinnerFrames[model.spinner%len(spinnerFrames)] + " 正在加载知乎" + model.mode.label() + "…", style: ansiBlue},
+			styledLine{text: spinnerFrames[model.spinner%len(spinnerFrames)] + " 正在加载知乎" + model.listLabel() + "…", style: ansiBlue},
 			styledLine{},
 			styledLine{text: "按 n / p 切换条目，按 r 刷新。", style: ansiDim},
 		)
 	} else {
 		lines = append(lines,
-			styledLine{text: model.mode.label() + "里暂时没有可显示的动态。", style: ansiDim},
+			styledLine{text: "暂时没有可显示的内容。", style: ansiDim},
 			styledLine{text: "按 r 刷新，按 q 退出。", style: ansiCyan},
 		)
+	}
+	if model.parent != nil {
+		lines = append(lines, styledLine{text: "按 Esc 返回原列表。", style: ansiCyan})
 	}
 	return fitHeight(lines, model.height)
 }
@@ -1203,7 +1232,8 @@ func renderHelp(width, height int) []styledLine {
 		{"v", "赞同内容、关注问题或赞同蓝色焦点评论；再次按下取消"},
 		{"w", "写评论 / 回复蓝色焦点所在评论"},
 		{"c", "加载评论 / 返回正文"},
-		{"e / Enter", "展开 / 收起蓝色焦点评论的回复或知乎聚合动态"},
+		{"e / Enter", "展开评论或聚合动态；问题按 Enter 打开回答列表"},
+		{"a / Esc", "打开所属问题的回答列表 / 返回原列表"},
 		{"z", "专注阅读 / 恢复双栏"},
 		{"o", "用默认浏览器打开当前动态"},
 		{"r", "刷新；新标题变绿 / 标记进程阅读范围"},
@@ -1224,8 +1254,18 @@ func renderHelp(width, height int) []styledLine {
 	return fitHeight(lines, height)
 }
 
+func (model *app) listLabel() string {
+	if model.question != nil {
+		return "回答列表"
+	}
+	return model.mode.label()
+}
+
 func headerText(model *app) string {
-	text := " 知乎" + model.mode.label() + " "
+	text := " 知乎" + model.listLabel() + " "
+	if model.question != nil {
+		text = " 问题回答 · " + model.question.title + " "
+	}
 	if len(model.items) > 0 {
 		text += fmt.Sprintf("· %s · 已加载 %d 条", typeLabel(model.items[model.index].kind), len(model.items))
 	}

@@ -1067,3 +1067,7 @@ func (source *commentTestSource) GetRecommendedFeed(context.Context, string, int
 func (source *commentTestSource) GetHotList(context.Context, int) (map[string]any, error) {
 	return nil, nil
 }
+
+func (source *commentTestSource) GetQuestionAnswersPage(context.Context, string, string, int) (map[string]any, error) {
+	return map[string]any{"data": []any{}}, nil
+}
